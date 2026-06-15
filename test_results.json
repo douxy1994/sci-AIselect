@@ -1,0 +1,134 @@
+{
+  "title": "Glacial lake systems are redefining risk in a changing Himalayan cryosphere",
+  "abstract": "Glacial lakes are expanding rapidly across the Himalaya in response to ongoing climate warming, with important implications for downstream hazard systems. This study integrates multi-decadal satellite...",
+  "keywords": [
+    "glacial lakes",
+    "GLOF",
+    "Himalaya",
+    "climate change",
+    "hazard assessment",
+    "remote sensing"
+  ],
+  "finder_results": [
+    {
+      "journal_name": "Journal of Hydrology",
+      "match_score": 1.0,
+      "issn": "",
+      "publisher": "Elsevier",
+      "url": "",
+      "source": "elsevier",
+      "raw_data": {
+        "rank": 1
+      },
+      "fetched_at": "2026-06-15T21:38:46.977939"
+    },
+    {
+      "journal_name": "Journal of Hydrology: Regional Studies",
+      "match_score": 0.95,
+      "issn": "",
+      "publisher": "Elsevier",
+      "url": "",
+      "source": "elsevier",
+      "raw_data": {
+        "rank": 2
+      },
+      "fetched_at": "2026-06-15T21:38:46.977952"
+    },
+    {
+      "journal_name": "Natural Hazards Research",
+      "match_score": 0.9,
+      "issn": "",
+      "publisher": "Elsevier",
+      "url": "",
+      "source": "elsevier",
+      "raw_data": {
+        "rank": 3
+      },
+      "fetched_at": "2026-06-15T21:38:46.977954"
+    },
+    {
+      "journal_name": "Geoscience Frontiers",
+      "match_score": 0.85,
+      "issn": "",
+      "publisher": "Elsevier",
+      "url": "",
+      "source": "elsevier",
+      "raw_data": {
+        "rank": 4
+      },
+      "fetched_at": "2026-06-15T21:38:46.977956"
+    },
+    {
+      "journal_name": "Global and Planetary Change",
+      "match_score": 0.8,
+      "issn": "",
+      "publisher": "Elsevier",
+      "url": "",
+      "source": "elsevier",
+      "raw_data": {
+        "rank": 5
+      },
+      "fetched_at": "2026-06-15T21:38:46.977958"
+    },
+    {
+      "journal_name": "Ecological Indicators",
+      "match_score": 0.75,
+      "issn": "",
+      "publisher": "Elsevier",
+      "url": "",
+      "source": "elsevier",
+      "raw_data": {
+        "rank": 6
+      },
+      "fetched_at": "2026-06-15T21:38:46.977960"
+    },
+    {
+      "journal_name": "Science of the Total Environment",
+      "match_score": 0.7,
+      "issn": "",
+      "publisher": "Elsevier",
+      "url": "",
+      "source": "elsevier",
+      "raw_data": {
+        "rank": 7
+      },
+      "fetched_at": "2026-06-15T21:38:46.977962"
+    },
+    {
+      "journal_name": "Quaternary Science Advances",
+      "match_score": 0.6499999999999999,
+      "issn": "",
+      "publisher": "Elsevier",
+      "url": "",
+      "source": "elsevier",
+      "raw_data": {
+        "rank": 8
+      },
+      "fetched_at": "2026-06-15T21:38:46.977965"
+    },
+    {
+      "journal_name": "Earth-Science Reviews",
+      "match_score": 0.6,
+      "issn": "",
+      "publisher": "Elsevier",
+      "url": "",
+      "source": "elsevier",
+      "raw_data": {
+        "rank": 9
+      },
+      "fetched_at": "2026-06-15T21:38:46.977967"
+    },
+    {
+      "journal_name": "Geomorphology",
+      "match_score": 0.55,
+      "issn": "",
+      "publisher": "Elsevier",
+      "url": "",
+      "source": "elsevier",
+      "raw_data": {
+        "rank": 10
+      },
+      "fetched_at": "2026-06-15T21:38:46.977968"
+    }
+  ]
+}
