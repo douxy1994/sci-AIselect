@@ -1,127 +1,247 @@
-# sci-aiselect 完全版 - 使用指南
+# sci-AIselect
 
-## 功能概述
+Paper-to-journal selection assistant. Combines publisher Journal Finders, LetPub expanded search, and innovation-driven quality assessment to recommend journals for SCI/SCIE/ESCI/SSCI submissions.
 
-sci-aiselect 是一个增强版的期刊选择助手，它结合了多个出版社的 Journal Finder 和 AI 匹配功能，提供更全面、更准确的期刊推荐。
+## How It Works
 
-## 快速开始
+### Three-Layer Signal Architecture
 
-### 运行测试
-
-```bash
-cd ~/.hermes/skills/sci-aiselect
-~/.hermes/hermes-agent/venv/bin/python3 test_full.py
+```
+┌─────────────────────────────────────────────────────────┐
+│  Layer 1: Journal Finder 初判 (5 publishers)            │
+│  → 确定论文级别：breakthrough / high / solid            │
+│  → 不限制最终候选池                                      │
+├─────────────────────────────────────────────────────────┤
+│  Layer 2: 扩展选刊 (all publishers)                      │
+│  → LetPub 搜索（所有出版社，含 ESCI）                    │
+│  → 跨学科顶级期刊池（NSR, Nature, Science, PNAS）        │
+│  → 文献检索校准（类似论文发在什么期刊）                   │
+├─────────────────────────────────────────────────────────┤
+│  Layer 3: 创新性微调 (regex patterns)                    │
+│  → 检测发现型创新（倍数变化、机制发现、反直觉结果）       │
+│  → 仅用于微调，不推翻 Layer 1                           │
+└─────────────────────────────────────────────────────────┘
 ```
 
-### Python API
+**核心原则：Journal Finder 用于初判论文级别，最终选刊不限于这五个出版社。**
+
+### Layer 1: Journal Finder 初判
+
+5 个出版社的 Journal Finder 并行运行，各自独立评估论文：
+
+| Publisher | URL | Coverage |
+|-----------|-----|----------|
+| Elsevier | journalfinder.elsevier.com | ~4000 journals |
+| Wiley | wiley.com/journal-finder | ~2000 journals |
+| Taylor & Francis | tandfonline.com/journal-suggester | ~3000 journals |
+| Springer | link.springer.com/journals | ~3000 journals |
+| Web of Science | mjl.clarivate.com | ~21000 journals |
+
+每个 Finder 返回排序结果，通过排序模式推断论文级别：
+- **多数 #1 是 Nature 级** → breakthrough
+- **多数 #1 是高影响力期刊** → high
+- **多数 #1 是区域/专业期刊** → solid
+- **出版社分歧** → 参考创新性评分
+
+### Layer 2: 扩展选刊
+
+初判确定论文级别后，从以下来源扩展候选池：
+
+**LetPub 搜索**（覆盖所有出版社）：
+- 不限 SCIE（包含 ESCI 期刊）
+- 每个学科分类取 15 个候选
+- 覆盖 AGU、Copernicus、MDPI、IEEE、Frontiers 等 Journal Finder 未覆盖的出版社
+
+**跨学科顶级期刊池**（高质量论文自动加入）：
+- National Science Review (IF~20)
+- Nature / Science (IF~60)
+- PNAS (IF~10)
+- Nature Communications (IF~16)
+- Nature Geoscience / Nature Climate Change / Nature Sustainability 等
+
+这些期刊永远不会出现在 Journal Finder 或 LetPub 分类搜索中，但确实发表高质量的跨学科研究。
+
+**Aim & Scope 语义匹配**：
+- 将论文标题/摘要中的关键词与期刊名/领域做交叉匹配
+- 例如：论文标题含 "Indicators" → 匹配 Environmental and Sustainability Indicators
+- 每项匹配 +8 分，封顶 30 分
+
+### Layer 3: 创新性微调
+
+通过正则模式检测摘要中的创新信号：
+
+| 类型 | 模式示例 | 分值 |
+|------|---------|------|
+| 明确声明 | "addresses this gap", "for the first time" | 35-40 |
+| 填补空白 | "little is known" + "this study" | 35 |
+| 关键差异发现 | "in stark contrast", "remarkably" | 25 |
+| 前兆检测成功 | "robustly detected ... years in advance" | 30 |
+| 倍数级变化 | "5-fold increase" | 25 |
+| 可比自然过程 | "comparable to alpine glaciation" | 20 |
+| 空间迁移趋势 | "migrating upslope" | 20 |
+
+创新性评分仅用于微调论文级别（≥50 分可从 solid 提升到 solid_high），不推翻 Journal Finder 的判断。
+
+### ESCI 处理
+
+ESCI（Emerging Sources Citation Index）期刊不再被无条件惩罚：
+- ESCI + JCR Q1/Q2 → 不扣分（如 ESI, IF=5.6, JCR Q1）
+- ESCI 无 Q1/Q2 分区 → 扣 10-12 分
+
+## Installation
+
+### Prerequisites
+
+```bash
+# Python 3.11+
+pip install playwright requests beautifulsoup4 pymupdf python-docx
+playwright install chromium
+```
+
+### As a Skill (Hermes / Claude Code / Codex)
+
+The skill is managed by skills-manager. Symlinks are automatically synced to all agents:
+
+```
+~/.hermes/skills/sci-aiselect  →  ~/.skills-manager/skills/sci-aiselect
+~/.claude/skills/sci-aiselect  →  ~/.skills-manager/skills/sci-aiselect
+~/.codex/skills/sci-aiselect   →  ~/.skills-manager/skills/sci-aiselect
+```
+
+### Standalone
+
+```bash
+git clone https://github.com/douxy1994/sci-AIselect.git
+cd sci-AIselect
+pip install -r requirements.txt
+playwright install chromium
+```
+
+## Usage
+
+### Quick Select (Python API)
 
 ```python
 import sys
-sys.path.insert(0, '/Users/alvis/.hermes/skills/sci-aiselect/scripts')
-
-from journal_finders import search_all_journal_finders
+sys.path.insert(0, 'scripts')
+from full_workflow import quick_select
 
 title = "Your paper title"
 abstract = "Your paper abstract..."
 keywords = ["keyword1", "keyword2"]
 
-config = {
-    'timeout': 60000,
-    'elsevier': {'enabled': True},
-    'wiley': {'enabled': False},
-    'taylor_francis': {'enabled': False},
-    'springer': {'enabled': False},
-    'wos': {'enabled': False},
-}
-
-results = search_all_journal_finders(title, abstract, keywords, config)
-
-for i, r in enumerate(results[:10], 1):
-    print(f"{i}. {r['journal_name']} (匹配度: {r['match_score']:.2f})")
+print(quick_select(title, abstract))
 ```
 
-## 测试结果示例
+### From File (PDF / Word)
 
-### 论文：Glacial lake systems are redefining risk in a changing Himalayan cryosphere
+```python
+import sys
+sys.path.insert(0, 'scripts')
+from full_workflow import extract_and_select
 
-**Elsevier Journal Finder 结果：**
-1. Quaternary Science Advances (匹配度: 1.00)
-2. Natural Hazards Research (匹配度: 0.95)
-3. Geosystems and Geoenvironment (匹配度: 0.90)
-4. Global and Planetary Change (匹配度: 0.85)
-5. Journal of Asian Earth Sciences (匹配度: 0.80)
-6. Evolving Earth (匹配度: 0.75)
-7. Geomorphology (匹配度: 0.70)
-8. Earth-Science Reviews (匹配度: 0.65)
-9. Quaternary Science Reviews (匹配度: 0.60)
-10. Palaeogeography, Palaeoclimatology, Palaeoecology (匹配度: 0.55)
+print(extract_and_select("path/to/paper.pdf"))
+```
 
-## 技术细节
-
-### Journal Finder 匹配度计算
-
-由于大多数 Journal Finder 不直接显示匹配度分数，我们使用排名来计算：
-- 第 1 名 → 匹配度 1.00
-- 第 2 名 → 匹配度 0.95
-- 第 3 名 → 匹配度 0.90
-- 以此类推...
-
-### Cookie 处理
-
-大多数出版社网站会显示 cookie 同意弹窗。我们使用 Playwright 自动处理：
-1. 查找 "Accept" 或 "Accept all" 按钮
-2. 自动点击
-3. 继续搜索流程
-
-### 依赖
+### Interactive Mode
 
 ```bash
-pip install playwright requests beautifulsoup4
-playwright install chromium
+python3 interactive.py
 ```
 
-## 项目结构
+### Journal Learning (Abstract Revision)
+
+```python
+import sys, asyncio
+sys.path.insert(0, 'scripts')
+from journal_learner import learn_and_suggest
+
+result = asyncio.run(learn_and_suggest(
+    "Journal of Hydrology",
+    "Your abstract here...",
+    "Your title here"
+))
+print(result)
+```
+
+### Journal Finder Only
+
+```python
+import sys
+sys.path.insert(0, 'scripts')
+from journal_finders import search_all_journal_finders
+
+results = search_all_journal_finders(title, abstract, keywords, config)
+for r in results[:10]:
+    print(f"{r['journal_name']} (匹配度: {r['match_score']:.2f})")
+```
+
+## Output Format
 
 ```
-~/.hermes/skills/sci-aiselect/
+# sci-aiselect 选刊建议：Your Paper Title
+
+**识别方向**：地球科学/自然地理学；环境科学与生态学/环境科学
+**命中主题**：glacial, hazard, climate change
+**论文档次**：扎实偏高质量研究（各出版社 #1 推荐：EPSL, GRL, Nature Geoscience）
+**创新性评分**：65/100
+  + 倍数级变化 (25分)
+  + 可比自然过程 (20分)
+  + 空间迁移趋势 (20分)
+
+## 快速决策表
+| 期刊 | 建议 | 梯度 | IF | 分区 | 收录 |
+|---|---|---|---|---|---|
+| National Science Review | 推荐 | 冲刺 | 20.0 | 1区 | SCIE |
+| Communications Earth & Environment | 推荐 | 稳妥 | 8.9 | 1区 | SCIE |
+| ... | ... | ... | ... | ... | ... |
+```
+
+## Scoring Formula
+
+```
+total_score = fit_score + quality_score × tier_scale - risk_penalty + aim_scope_bonus
+```
+
+| Component | Range | Source |
+|-----------|-------|--------|
+| `fit_score` | 0-32 | Journal Finder match (20) + consensus bonus (12) + topic match (10) |
+| `quality_score` | 0-43 | Partition (18) + IF (15) + h-index (8), scaled by tier |
+| `tier_scale` | 0.7-1.0 | breakthrough=1.0, high=0.95, solid_high=0.85, solid=0.7 |
+| `risk_penalty` | 0-60 | Warning (60) + ESCI without Q1/Q2 (10) + unconfirmed SCI (30) |
+| `aim_scope_bonus` | 0-30 | Journal name/field keyword match with paper (8 per match) |
+
+## Project Structure
+
+```
+sci-AIselect/
 ├── scripts/
-│   ├── journal_finders/
-│   │   ├── __init__.py          # 模块入口
-│   │   ├── base.py              # 基类
-│   │   ├── elsevier.py          # Elsevier (已实现)
-│   │   ├── wiley.py             # Wiley (框架)
-│   │   ├── taylor_francis.py    # Taylor & Francis (框架)
-│   │   ├── springer.py          # Springer (框架)
-│   │   └── wos.py               # Web of Science (需要 cookies)
-│   ├── select_journals.py       # 主选择器
-│   ├── journal_metrics.py       # 期刊指标
-│   ├── letpub_client.py         # LetPub 客户端
-│   └── ...
-├── test_full.py                 # 完整测试脚本
-├── test_journal_finders.py      # Journal Finder 测试
-├── SKILL.md                     # 技能文档
-└── ...
+│   ├── journal_finders/         # 5 publisher Journal Finders
+│   │   ├── base.py              # Base class with Playwright automation
+│   │   ├── elsevier.py
+│   │   ├── wiley.py
+│   │   ├── taylor_francis.py
+│   │   ├── springer.py
+│   │   └── wos.py
+│   ├── full_workflow.py         # Main workflow (3-layer architecture)
+│   ├── select_journals.py       # Standalone AI selector
+│   ├── journal_learner.py       # Journal learning + abstract revision
+│   ├── journal_metrics.py       # LetPub + OpenAlex metrics
+│   ├── letpub_client.py         # LetPub advanced search
+│   ├── recommend.py             # Backward-compatible wrappers
+│   └── cookies_manager.py       # Cookie persistence
+├── assets/
+│   └── journal_cache.json       # Cached journal metrics
+├── references/
+│   ├── data-sources.md
+│   ├── journal-finder-automation.md
+│   └── journal-finder-api-notes.md
+├── interactive.py               # Interactive CLI
+├── SKILL.md                     # Skill documentation (agent-facing)
+├── README.md                    # This file
+└── requirements.txt
 ```
 
-## 下一步工作
+## License
 
-1. **完善其他 Journal Finder**
-   - Wiley Journal Finder
-   - Taylor & Francis Journal Suggester
-   - Springer Journal Finder
-
-2. **集成到 AI 匹配流程**
-   - 将 Journal Finder 结果作为初始候选
-   - 优化结果合并和排序
-
-3. **Web of Science 支持**
-   - 实现 cookies 认证
-   - 处理登录流程
-
-## 联系方式
-
-如有问题或建议，请联系开发者。
-
-## 许可证
-
-MIT License
+MIT
