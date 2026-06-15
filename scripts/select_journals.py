@@ -183,13 +183,14 @@ def search_candidates(
     categories: List[Category],
     impact_low: str = "",
     impact_high: str = "",
-    sci_type: str = "SCIE",
+    sci_type: str = "",  # 默认不限 SCI 类型，包含 ESCI
     oa: str = "",
     partition: str = "",
     sort: str = "impactor",
-    limit_per_category: int = 8,
+    limit_per_category: int = 15,  # 每类取 15 个，扩大覆盖
 ) -> List[MetricRecord]:
-    """Search LetPub candidates for multiple inferred categories."""
+    """Search LetPub candidates for multiple inferred categories.
+    Covers all publishers, not limited to the 5 Journal Finder publishers."""
     grouped_candidates: List[List[MetricRecord]] = []
 
     for category in categories:
@@ -251,7 +252,7 @@ def select_journals(
     categories: Optional[List[Category]] = None,
     impact_low: str = "",
     impact_high: str = "",
-    sci_type: str = "SCIE",
+    sci_type: str = "",  # 默认不限 SCI 类型，包含 ESCI
     oa: str = "",
     partition: str = "",
     sort: str = "impactor",
@@ -585,8 +586,13 @@ def _risk_penalty(profile: Dict, record: MetricRecord) -> Tuple[int, List[str]]:
 
     sci = _clean_sci(record.get("sci_type", ""))
     if "ESCI" in sci:
-        penalty += 12
-        reasons.append("ESCI 期刊，需确认是否满足投稿要求")
+        # ESCI 不应该无条件惩罚——如果 JCR 分区是 Q1/Q2，说明质量不差
+        partition = str(record.get("partition", ""))
+        if "1区" in partition or "2区" in partition:
+            penalty += 0  # JCR Q1/Q2 的 ESCI 期刊不扣分
+        else:
+            penalty += 12
+            reasons.append("ESCI 期刊，需确认是否满足投稿要求")
     elif not sci and "letpub" in record.get("_sources", []):
         penalty += 35
         reasons.append("未确认 SCI/SCIE 收录")
