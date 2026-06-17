@@ -2,6 +2,16 @@
 
 Paper-to-journal selection assistant. Combines publisher Journal Finders, LetPub expanded search, and innovation-driven quality assessment to recommend journals for SCI/SCIE/ESCI/SSCI submissions.
 
+## 当前版本更新说明 / Current Version Updates (2026-06-17)
+
+当前版本在原有选刊流程基础上，增加了更贴近投稿决策的几个模块：
+
+- **审稿周期可选加权**：只有当用户明确提出“审稿快”“审稿周期短”“尽快接收/见刊”等需求时，才把审稿周期纳入排序权重。数据优先来自期刊官网或出版商页面，官网未获取时再参考 LetPub。
+- **WOS On Hold 硬排除**：被 Web of Science / Clarivate 标记为 `On Hold` 的期刊会在评分前直接排除，不进入推荐、备选、谨慎或不推荐列表。
+- **APC 信息展示**：每个推荐期刊都展示 APC 状态、数据来源和可获取时的人民币估算。APC 优先使用官网数据，其次参考 DOAJ 和 OpenAlex；非人民币金额会在可获取汇率时动态折算。
+- **目标期刊后续服务**：用户选择意向期刊后，除摘要润色建议外，还会根据给定模板生成 text-only 的参考 cover letter。
+- **Cover letter 风险声明**：生成的 cover letter 明确标注“仅供参考”，内容只基于标题、摘要和公开期刊信息，正式投稿前必须由作者逐句核实。
+
 ## How It Works
 
 ### Three-Layer Signal Architecture
@@ -241,6 +251,14 @@ sci-AIselect/
 ├── README.md                    # This file
 └── requirements.txt
 ```
+
+## 项目来源与致谢 / Project Origin and Acknowledgements
+
+本 skill 是基于原开源项目 [keros68/sci-select](https://github.com/keros68/sci-select/) 进行的二次改动和更新。原项目建立了论文投稿选刊 skill 的核心思路，包括公开期刊指标聚合、SCI/SCIE/ESCI/SSCI 候选期刊推荐、匹配理由和投稿梯度输出等基础框架。
+
+本仓库在该基础上扩展为 `sci-AIselect`，进一步加入 Journal Finder 编排、审稿周期处理、APC 信息展示、WOS On Hold 排除、目标期刊学习和参考 cover letter 生成等功能。
+
+感谢 `keros68/sci-select` 原项目及其作者/贡献者提供的初始项目基础。
 
 ## License
 
