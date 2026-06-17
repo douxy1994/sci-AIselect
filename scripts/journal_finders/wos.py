@@ -163,6 +163,11 @@ class WosJournalFinder(BaseJournalFinder):
                         next_line = lines[i + 1].strip()
                         if 'publisher:' in next_line.lower() or 'issn' in lines[i + 2].lower() if i + 2 < len(lines) else False:
                             if line.lower() not in seen_names:
+                                status_text = " ".join(l.strip() for l in lines[i:i + 8])
+                                if re.search(r'on\s*[- ]?hold|暂停收录|收录暂停', status_text, flags=re.I):
+                                    i += 1
+                                    continue
+
                                 seen_names.add(line.lower())
                                 rank += 1
                                 match_score = max(0.1, 1.0 - (rank - 1) * 0.05)
@@ -172,7 +177,7 @@ class WosJournalFinder(BaseJournalFinder):
                                     match_score=match_score,
                                     publisher='Clarivate',
                                     source=self.SOURCE_NAME,
-                                    raw_data={'rank': rank},
+                                    raw_data={'rank': rank, 'status_text': status_text[:500]},
                                 )
                                 results.append(result)
                                 

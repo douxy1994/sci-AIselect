@@ -13,7 +13,17 @@ import re
 import time
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from .journal_metrics import get_journal_metrics, format_metrics_line
+from .journal_metrics import (
+    annotate_apc,
+    annotate_review_cycle,
+    format_apc_line,
+    format_metrics_line,
+    format_review_cycle,
+    get_journal_metrics,
+    has_wos_on_hold_status,
+    review_preference_enabled,
+    score_review_speed,
+)
 from .letpub_client import advanced_search
 
 
@@ -257,11 +267,13 @@ def select_journals(
     partition: str = "",
     sort: str = "impactor",
     max_candidates: int = 10,
+    review_preference: bool = False,
 ) -> Dict:
     """Run the full sci-aiselect workflow."""
     profile = infer_paper_profile(text)
     if categories:
         profile["categories"] = categories
+    profile["review_speed_priority"] = review_preference_enabled(review_preference)
     candidate_pool = search_candidates(
         profile["categories"],
         impact_low=impact_low,
@@ -276,6 +288,8 @@ def select_journals(
 
     metric_records = []
     for candidate in candidates:
+        if has_wos_on_hold_status(candidate):
+            continue
         name = candidate.get("name", "")
         metrics = get_journal_metrics(name)
         if not metrics.get("_sources"):
@@ -289,10 +303,20 @@ def select_journals(
                 }
             )
         metrics["_candidate"] = candidate
+        annotate_review_cycle(metrics)
+        annotate_apc(metrics)
+        if has_wos_on_hold_status(metrics):
+            continue
         metric_records.append(metrics)
         time.sleep(1)
 
-    ranked = assign_submission_bands(rank_metric_records(profile, metric_records))
+    ranked = assign_submission_bands(
+        rank_metric_records(
+            profile,
+            metric_records,
+            preferences={"review_speed_priority": profile["review_speed_priority"]},
+        )
+    )
 
     return {"profile": profile, "results": ranked}
 
@@ -357,17 +381,24 @@ def rank_metric_records(
 ) -> List[Dict]:
     """Score and tier already-fetched journal metric records."""
     preferences = preferences or {}
+    review_priority = review_preference_enabled(preferences.get("review_speed_priority"))
     ranked = []
 
     for record in records:
+        if has_wos_on_hold_status(record):
+            continue
         entry = dict(record)
+        annotate_review_cycle(entry)
+        annotate_apc(entry)
         fit_score, fit_reasons = _topic_fit(profile, entry)
         quality_score, quality_reasons = _quality_score(entry, preferences)
         risk_penalty, risk_reasons = _risk_penalty(profile, entry)
-        total_score = fit_score + quality_score - risk_penalty
+        review_speed_score = score_review_speed(entry, enabled=review_priority)
+        total_score = fit_score + quality_score + review_speed_score - risk_penalty
 
         entry["fit_score"] = fit_score
         entry["quality_score"] = quality_score
+        entry["review_speed_score"] = review_speed_score
         entry["risk_penalty"] = risk_penalty
         entry["score"] = total_score
         entry["fit_reasons"] = fit_reasons
@@ -417,6 +448,9 @@ def format_selection_report(
     if terms:
         lines.append(f"**命中主题**：{terms}")
 
+    if profile.get("review_speed_priority"):
+        lines.append("**审稿周期偏好**：已启用快审/尽快接收见刊加权；WOS On Hold 期刊已硬排除。")
+
     lines.append("**重要提示**：未提供全文质量评价时，以下结果只是选刊梯度，不代表稿件一定适合或能够命中高影响力期刊。建议同时保留冲刺、稳妥和保底选择。")
 
     lines.append("")
@@ -427,8 +461,12 @@ def format_selection_report(
         band = item.get("submission_band", "待定")
         lines.append(f"## {idx}. {item.get('name', '未知期刊')}｜{band}｜{tier_icons.get(item['tier'], item['tier'])}")
         lines.append(f"**指标**：{item.get('metrics_line') or format_metrics_line(item)}")
+        lines.append(f"**APC**：{format_apc_line(item)}")
+        lines.append(f"**审稿周期**：{format_review_cycle(item)}")
         if item.get("fit_reasons"):
             lines.append(f"**匹配理由**：{'；'.join(item['fit_reasons'][:3])}")
+        if item.get("review_speed_score"):
+            lines.append(f"**周期权重**：{item['review_speed_score']:+d}")
         if item.get("risk_reasons"):
             lines.append(f"**风险提醒**：{'；'.join(item['risk_reasons'])}")
         if item.get("data_notes"):
@@ -447,7 +485,7 @@ def format_selection_matrix(
     lines = [
         "## 快速决策表",
         "",
-        "| 期刊 | 建议 | 主题匹配 | 梯度 | IF | 分区 | 收录 | OA/APC | 审稿速度 | 数据状态 |",
+        "| 期刊 | 建议 | 主题匹配 | 梯度 | IF | 分区 | 收录 | APC | 审稿速度 | 数据状态 |",
         "|---|---|---:|---|---:|---|---|---|---|---|",
     ]
 
@@ -461,7 +499,7 @@ def format_selection_matrix(
                 impact=item.get("impact_factor") or "-",
                 partition=item.get("partition") or "-",
                 sci=_format_sci_cell(item),
-                oa=_format_oa_cell(item),
+                oa=_table_cell(format_apc_line(item)),
                 speed=_table_cell(_short_speed(item.get("speed", ""))),
                 data=_table_cell(_compact_data_status(item)),
             )
@@ -584,6 +622,10 @@ def _risk_penalty(profile: Dict, record: MetricRecord) -> Tuple[int, List[str]]:
         penalty += 60
         reasons.append("LetPub/中科院预警风险")
 
+    if has_wos_on_hold_status(record):
+        penalty += 999
+        reasons.append("WOS On Hold，必须排除")
+
     sci = _clean_sci(record.get("sci_type", ""))
     if "ESCI" in sci:
         # ESCI 不应该无条件惩罚——如果 JCR 分区是 Q1/Q2，说明质量不差
@@ -609,6 +651,8 @@ def _risk_penalty(profile: Dict, record: MetricRecord) -> Tuple[int, List[str]]:
 
 
 def _tier(entry: MetricRecord) -> str:
+    if has_wos_on_hold_status(entry):
+        return "不推荐"
     if entry.get("warning"):
         return "不推荐"
 

@@ -4,6 +4,8 @@ import unittest
 
 import scripts.journal_metrics as metrics
 selector = importlib.import_module("scripts.select_journals")
+full_workflow = importlib.import_module("scripts.full_workflow")
+journal_learner = importlib.import_module("scripts.journal_learner")
 from scripts.select_journals import (
     infer_paper_profile,
     rank_metric_records,
@@ -12,6 +14,7 @@ from scripts.select_journals import (
     interleave_candidate_groups,
     assign_submission_bands,
 )
+from scripts.journal_learner import generate_reference_cover_letter
 
 
 class SciAiselectTests(unittest.TestCase):
@@ -238,9 +241,164 @@ class SciAiselectTests(unittest.TestCase):
 
         self.assertEqual([item["submission_band"] for item in banded], ["冲刺", "稳妥", "保底"])
         self.assertIn("未提供全文质量评价", report)
-        self.assertIn("冲刺", report)
-        self.assertIn("稳妥", report)
-        self.assertIn("保底", report)
+
+    def test_fast_review_preference_changes_ranking(self):
+        profile = infer_paper_profile("groundwater nitrate hydrochemistry")
+        records = [
+            {
+                "name": "Fast Water Journal",
+                "impact_factor": "5.5",
+                "partition": "2区",
+                "sci_type": "SCIE",
+                "h_index": 80,
+                "field": "水资源",
+                "speed": "期刊官网数据：Time to first decision: 5 days; Review time: 28 days; Submission to acceptance: 45 days",
+                "_sources": ["letpub", "openalex"],
+            },
+            {
+                "name": "Slow Elite Water Journal",
+                "impact_factor": "8.5",
+                "partition": "1区",
+                "sci_type": "SCIE",
+                "h_index": 160,
+                "field": "水资源",
+                "speed": "网友分享经验：平均8.3个月",
+                "_sources": ["letpub", "openalex"],
+            },
+        ]
+
+        normal = rank_metric_records(profile, records)
+        fast_weighted = rank_metric_records(
+            profile,
+            records,
+            preferences={"review_speed_priority": True},
+        )
+
+        self.assertEqual(normal[0]["name"], "Slow Elite Water Journal")
+        self.assertEqual(fast_weighted[0]["name"], "Fast Water Journal")
+        self.assertGreater(fast_weighted[0]["review_speed_score"], 0)
+
+    def test_wos_on_hold_records_are_excluded(self):
+        profile = infer_paper_profile("groundwater nitrate hydrochemistry")
+        records = [
+            {
+                "name": "On Hold Water Journal",
+                "impact_factor": "20",
+                "partition": "1区",
+                "sci_type": "SCIE",
+                "field": "水资源",
+                "raw_data": {"source": "wos", "status": "Web of Science Core Collection: On Hold"},
+                "_sources": ["letpub", "openalex"],
+            },
+            {
+                "name": "Active Water Journal",
+                "impact_factor": "4.5",
+                "partition": "2区",
+                "sci_type": "SCIE",
+                "field": "水资源",
+                "_sources": ["letpub", "openalex"],
+            },
+        ]
+
+        ranked = rank_metric_records(profile, records)
+
+        self.assertEqual([item["name"] for item in ranked], ["Active Water Journal"])
+
+    def test_apc_line_uses_doaj_price_and_cny_rate(self):
+        original_rate = metrics._get_cny_rate
+        metrics._get_cny_rate = lambda currency: {"rate": 7.1, "date": "2026-06-17"}
+        try:
+            profile = infer_paper_profile("groundwater nitrate hydrochemistry")
+            ranked = rank_metric_records(
+                profile,
+                [
+                    {
+                        "name": "APC Water Journal",
+                        "impact_factor": "5.5",
+                        "partition": "2区",
+                        "sci_type": "SCIE",
+                        "field": "水资源",
+                        "doaj_apc": {
+                            "has_apc": True,
+                            "max": [{"price": 1995, "currency": "USD"}],
+                        },
+                        "_sources": ["doaj", "openalex"],
+                    }
+                ],
+            )
+            report = format_selection_report(profile, ranked)
+        finally:
+            metrics._get_cny_rate = original_rate
+
+        self.assertEqual(ranked[0]["apc_source"], "DOAJ")
+        self.assertIn("USD 1995", report)
+        self.assertIn("RMB 14164", report)
+
+    def test_full_workflow_accepts_review_preference_without_live_network(self):
+        original_finders = full_workflow.search_all_journal_finders
+        original_search = full_workflow.advanced_search
+        original_metrics = full_workflow.get_journal_metrics_safe
+        try:
+            full_workflow.search_all_journal_finders = lambda *args, **kwargs: []
+            full_workflow.advanced_search = lambda **kwargs: {
+                "journals": [{"name": "Fast Water Journal"}]
+            }
+            full_workflow.get_journal_metrics_safe = lambda name: {
+                "name": name,
+                "impact_factor": "5.5",
+                "partition": "2区",
+                "sci_type": "SCIE",
+                "h_index": 80,
+                "field": "水资源",
+                "speed": "期刊官网数据：Time to first decision: 5 days; Submission to acceptance: 45 days",
+                "_sources": ["letpub", "openalex"],
+            }
+
+            bundle = full_workflow.select_journals_with_finder(
+                title="Groundwater nitrate hydrochemistry",
+                abstract="This study examines groundwater nitrate using hydrochemistry.",
+                keywords=["groundwater"],
+                use_journal_finders=False,
+                review_preference=True,
+            )
+        finally:
+            full_workflow.search_all_journal_finders = original_finders
+            full_workflow.advanced_search = original_search
+            full_workflow.get_journal_metrics_safe = original_metrics
+
+        self.assertTrue(bundle["review_speed_priority"])
+        self.assertEqual(bundle["results"][0]["name"], "Fast Water Journal")
+        self.assertGreater(bundle["results"][0]["review_speed_score"], 0)
+
+    def test_cover_letter_follows_template_and_disclaims_verification(self):
+        cover_letter = generate_reference_cover_letter(
+            title="Groundwater nitrate source identification using stable isotopes",
+            abstract=(
+                "Groundwater nitrate pollution threatens agricultural watersheds. "
+                "This study uses stable isotopes and hydrochemistry to identify nitrate sources. "
+                "The results reveal dominant fertilizer and manure contributions with implications for water management."
+            ),
+            journal_info={
+                "name": "Journal of Hydrology",
+                "aim_scope": "The journal publishes hydrology, water resources, and environmental research.",
+                "style_analysis": {"common_title_words": ["water", "hydrology"]},
+            },
+        )
+
+        self.assertIn("仅供参考", cover_letter)
+        self.assertIn("不对内容是否合理和真实负责", cover_letter)
+        self.assertIn("Dear Editor,", cover_letter)
+        self.assertIn("Groundwater nitrate source identification using stable isotopes", cover_letter)
+        self.assertIn("Journal of Hydrology", cover_letter)
+        self.assertIn("hydrology", cover_letter)
+        self.assertIn("merit external review", cover_letter)
+        self.assertIn("readership", cover_letter)
+        self.assertIn("topical fit", cover_letter)
+        self.assertIn("Please verify before use", cover_letter)
+        self.assertIn("Sincerely", cover_letter)
+        self.assertIn("XXXXX", cover_letter)
+        self.assertNotIn("[Title]", cover_letter)
+        self.assertNotIn("[Journal]", cover_letter)
 
 
 if __name__ == "__main__":

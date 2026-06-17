@@ -30,6 +30,7 @@ def recommend(
     sort: str = "impactor",
     max_candidates: int = 10,
     enrich_details: bool = True,
+    review_preference: bool = False,
 ) -> List[Dict]:
     """
     Compatibility wrapper for the old recommend() API.
@@ -63,7 +64,11 @@ def recommend(
             }
             for c in candidates
         ]
-        return rank_metric_records(profile, metric_records)
+        return rank_metric_records(
+            profile,
+            metric_records,
+            preferences={"review_speed_priority": review_preference},
+        )
 
     return select_journals(
         text=text,
@@ -75,6 +80,7 @@ def recommend(
         partition=partition,
         sort=sort,
         max_candidates=max_candidates,
+        review_preference=review_preference,
     )["results"]
 
 

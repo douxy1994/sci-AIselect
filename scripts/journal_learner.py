@@ -5,6 +5,7 @@
 1. 学习期刊的 aim and scope
 2. 分析最近发表的文献
 3. 给出摘要润色建议
+4. 基于模板生成仅供参考的 cover letter 文本
 """
 from __future__ import annotations
 
@@ -310,6 +311,239 @@ def suggest_abstract_revision(
     return "\n".join(report)
 
 
+def generate_reference_cover_letter(
+    title: str,
+    abstract: str,
+    journal_info: Dict,
+) -> str:
+    """
+    Generate a reference-only cover letter from title, abstract, and target-journal signals.
+
+    The output intentionally includes a strong disclaimer because the tool only sees
+    title/abstract-level evidence and cannot verify authorship, originality, prior
+    submission status, ethical approvals, conflicts of interest, or factual claims.
+    """
+    journal_name = journal_info.get('name', 'the target journal')
+    title = (title or '[Manuscript Title]').strip()
+    abstract = (abstract or '').strip()
+    background = _infer_background_significance_paragraph(title, abstract)
+    main_work = _infer_main_work_and_novelty_paragraph(abstract)
+    editorial_hook = _infer_editorial_hook(title, abstract, journal_info)
+    alignment = _infer_journal_alignment(journal_info)
+
+    lines = [
+        "# Cover Letter 参考稿（仅供参考）",
+        "",
+        "> 重要声明：以下 cover letter 仅供参考，只基于你提供的标题、摘要和公开期刊信息生成；我不对内容是否合理和真实负责。",
+        "> 我无法核验作者贡献、伦理审批、利益冲突、原创性、是否一稿多投、数据可用性或任何投稿声明。正式投稿前必须由作者逐句核实和修改。",
+        "> 模板说明：正文仅替换模板方括号内容；不生成 Word 文件。",
+        "",
+        "Dear Editor,",
+        "",
+        f"We are pleased to submit our manuscript, “{title},” for consideration in {journal_name}.",
+        "",
+        background,
+        "",
+        main_work,
+        "",
+        editorial_hook + " " + alignment,
+        "",
+        "Please verify before use: We confirm that this manuscript is original, has not been published elsewhere, and is not under consideration by any other journal. We further confirm that all authors have approved the manuscript and agree with its submission to this journal.",
+        "",
+        "Thank you for considering our manuscript. We would be grateful for the opportunity to have it reviewed for publication in your journal, and we look forward to your response.",
+        "",
+        "Sincerely,",
+        "",
+        "XXXXX",
+    ]
+    return "\n".join(lines)
+
+
+def _infer_background_significance_paragraph(title: str, abstract: str) -> str:
+    sentences = _split_sentences(abstract)
+    title_signal = _title_signal_phrase(title)
+    if sentences:
+        return (
+            f"The manuscript addresses {title_signal}, a topic with clear relevance for the field. "
+            f"The abstract frames the underlying problem as follows: {_trim_sentence(sentences[0])} "
+            "This opening issue gives the submission an editor-facing rationale beyond a narrow case description."
+        )
+    return (
+        f"The manuscript addresses {title_signal}, a topic that may be relevant to the journal’s readership. "
+        "The authors should strengthen this paragraph with the verified research gap, broader significance, and why the study is timely."
+    )
+
+
+def _infer_main_work_and_novelty_paragraph(abstract: str) -> str:
+    sentences = _split_sentences(abstract)
+    method_keywords = (
+        'method', 'approach', 'data', 'dataset', 'model', 'analysis', 'experiment',
+        'observation', 'remote sensing', 'survey', 'monitoring', 'simulation'
+    )
+    result_keywords = (
+        'result', 'finding', 'show', 'reveal', 'indicate', 'demonstrate',
+        'highlight', 'suggest', 'found', 'identified', 'observed'
+    )
+    method_sentence = ""
+    result_sentence = ""
+    for sentence in sentences:
+        lowered = sentence.lower()
+        if not method_sentence and any(keyword in lowered for keyword in method_keywords):
+            method_sentence = _trim_sentence(sentence)
+        if not result_sentence and any(keyword in lowered for keyword in result_keywords):
+            result_sentence = _trim_sentence(sentence)
+        if method_sentence and result_sentence:
+            break
+
+    if not method_sentence and len(sentences) >= 2:
+        method_sentence = _trim_sentence(sentences[1])
+    if not result_sentence and sentences:
+        result_sentence = _trim_sentence(sentences[-1])
+
+    if method_sentence and result_sentence and method_sentence != result_sentence:
+        return (
+            f"To address this problem, the study appears to use the following evidence base or analytical strategy: {method_sentence} "
+            f"The main result or contribution highlighted in the abstract is: {result_sentence} "
+            "For an editor, this paragraph should make the paper’s concrete advance immediately visible."
+        )
+    if method_sentence:
+        return (
+            f"To address this problem, the study appears to present the following core work: {method_sentence} "
+            "The authors should refine this paragraph by adding the most concrete verified result and the specific advance over prior work."
+        )
+    return (
+        "To address this problem, the manuscript should summarize the core work, evidence base, and most concrete finding in one compact paragraph. "
+        "Because only the title and abstract are available here, the authors should replace this sentence with verified methodological and result details from the manuscript."
+    )
+
+
+def _infer_editorial_hook(title: str, abstract: str, journal_info: Dict) -> str:
+    hook_parts = []
+    novelty_sentence = _find_novelty_or_implication_sentence(abstract)
+    if novelty_sentence:
+        hook_parts.append(
+            "The main reason this submission may merit external review is that the abstract points to a specific contribution: "
+            + _trim_sentence(novelty_sentence)
+        )
+    else:
+        hook_parts.append(
+            "The main reason this submission may merit external review is its potential to connect a recognizable research problem with evidence that could be useful to the journal’s readers."
+        )
+
+    scope_terms = _extract_focus_terms(str(journal_info.get('aim_scope', '') or ''))
+    if scope_terms:
+        hook_parts.append(
+            "This framing should help the editor see a direct readership fit around "
+            + ", ".join(scope_terms[:4])
+            + "."
+        )
+    else:
+        title_terms = _content_terms(title)[:4]
+        if title_terms:
+            hook_parts.append(
+                "The title itself signals a readership fit around "
+                + ", ".join(title_terms)
+                + "."
+            )
+
+    return " ".join(hook_parts)
+
+
+def _find_novelty_or_implication_sentence(abstract: str) -> str:
+    sentences = _split_sentences(abstract)
+    novelty_keywords = (
+        'novel', 'first', 'new', 'reveal', 'demonstrate', 'show', 'finding',
+        'indicate', 'highlight', 'significant', 'advance', 'improve',
+        'unprecedented', 'mechanism', 'implication', 'important', 'key',
+        'substantial', 'robust', 'risk', 'management', 'policy'
+    )
+    for sentence in sentences:
+        lowered = sentence.lower()
+        if any(keyword in lowered for keyword in novelty_keywords):
+            return sentence
+    return ""
+
+
+def _infer_journal_alignment(journal_info: Dict) -> str:
+    journal_name = journal_info.get('name', 'the target journal')
+    aim_scope = str(journal_info.get('aim_scope', '') or '')
+    focus_terms = _extract_focus_terms(aim_scope)
+    style_analysis = journal_info.get('style_analysis', {}) or {}
+    common_words = style_analysis.get('common_title_words', [])[:5]
+
+    if focus_terms:
+        return (
+            f"We therefore believe the manuscript is potentially well aligned with {journal_name}: the journal’s stated scope emphasizes "
+            f"{', '.join(focus_terms)}, and the manuscript’s topic and implications appear relevant to those readers. "
+            "This combination of topical fit, identifiable contribution, and potential broader interest is why the paper may be suitable for peer review."
+        )
+    if common_words:
+        return (
+            f"We therefore believe the manuscript is potentially suitable for {journal_name}. Recent article-title signals from the journal include "
+            f"{', '.join(common_words)}, which may overlap with the manuscript’s subject area and intended readership. "
+            "This likely readership connection is the central reason for requesting editorial consideration."
+        )
+    return (
+        f"We therefore believe the manuscript may be of interest to readers of {journal_name}, subject to the authors’ verification of fit with the journal’s aims, scope, and author guidelines. "
+        "The authors should sharpen this paragraph by naming the journal-specific audience and the most compelling reason the editor should send the paper for external review."
+    )
+
+
+def _extract_focus_terms(text: str) -> List[str]:
+    focus_terms = []
+    keywords = [
+        'climate', 'environment', 'ecology', 'hydrology', 'geology',
+        'remote sensing', 'GIS', 'sustainability', 'hazard', 'risk',
+        'water', 'earth', 'management', 'policy', 'model'
+    ]
+    lowered = text.lower()
+    for keyword in keywords:
+        if keyword in lowered and keyword not in focus_terms:
+            focus_terms.append(keyword)
+    return focus_terms[:5]
+
+
+def _split_sentences(text: str) -> List[str]:
+    text = re.sub(r'\s+', ' ', text or '').strip()
+    if not text:
+        return []
+    parts = re.split(r'(?<=[.!?])\s+', text)
+    return [part.strip() for part in parts if len(part.strip()) >= 20]
+
+
+def _title_signal_phrase(title: str) -> str:
+    terms = _content_terms(title)
+    if terms:
+        return "the problem of " + ", ".join(terms[:5])
+    return "the research problem described by the manuscript title"
+
+
+def _content_terms(text: str) -> List[str]:
+    stopwords = {
+        'the', 'and', 'for', 'with', 'using', 'from', 'into', 'onto', 'that',
+        'this', 'these', 'those', 'study', 'analysis', 'based', 'across',
+        'between', 'under', 'over', 'through', 'towards', 'toward', 'a', 'an',
+        'of', 'in', 'on', 'to', 'by', 'is', 'are', 'be'
+    }
+    words = re.findall(r'[A-Za-z][A-Za-z-]{3,}', text or '')
+    seen = set()
+    terms = []
+    for word in words:
+        lowered = word.lower().strip('-')
+        if lowered in stopwords or lowered in seen:
+            continue
+        seen.add(lowered)
+        terms.append(lowered)
+    return terms
+
+
+def _trim_sentence(sentence: str, limit: int = 420) -> str:
+    sentence = re.sub(r'\s+', ' ', sentence or '').strip()
+    if len(sentence) <= limit:
+        return sentence
+    return sentence[:limit].rsplit(' ', 1)[0] + "..."
+
+
 # 便捷函数
 async def learn_and_suggest(
     journal_name: str,
@@ -329,4 +563,7 @@ async def learn_and_suggest(
     """
     learner = JournalLearner()
     journal_info = await learner.learn_journal(journal_name)
-    return suggest_abstract_revision(abstract, journal_info, title)
+    return "\n\n".join([
+        suggest_abstract_revision(abstract, journal_info, title),
+        generate_reference_cover_letter(title, abstract, journal_info),
+    ])

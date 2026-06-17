@@ -7,7 +7,7 @@ sci-aiselect 交互式脚本
 2. Journal Finder 初筛
 3. AI 匹配（结合 Journal Finder 结果作为权重参考）
 4. 提供 10 个综合选择
-5. 意向期刊学习和摘要润色
+5. 意向期刊学习、摘要润色和 cover letter 参考稿
 6. 不满意时重新匹配
 """
 import sys
@@ -79,6 +79,9 @@ def main():
     if not title and not abstract:
         print("\n错误：未提供论文信息。")
         return
+
+    speed_choice = input("\n是否优先考虑审稿周期短/尽快接收见刊？(y/N): ").strip().lower()
+    review_preference = speed_choice in ('y', 'yes', '是', '需要', '快审')
     
     # 步骤 2: Journal Finder 初筛 + AI 匹配
     print("\n" + "="*70)
@@ -91,6 +94,7 @@ def main():
         keywords=keywords,
         use_journal_finders=True,
         max_candidates=10,
+        review_preference=review_preference,
     )
     
     # 步骤 3: 显示结果
@@ -103,7 +107,7 @@ def main():
     while True:
         print("\n" + "="*70)
         print("请选择操作：")
-        print("1. 选择一个意向期刊，学习其风格并获取摘要润色建议")
+        print("1. 选择一个意向期刊，学习其风格并获取摘要润色建议 + cover letter 参考稿")
         print("2. 不满意，重新进行 AI 匹配（不参考 Journal Finder 结果）")
         print("3. 退出")
         
@@ -117,7 +121,7 @@ def main():
                 print(f"\n正在学习期刊：{journal_name}")
                 print("（这可能需要一些时间...）")
                 
-                # 学习期刊并获取摘要润色建议
+                # 学习期刊并获取摘要润色建议和 cover letter 参考稿
                 suggestions = asyncio.run(learn_and_suggest(journal_name, abstract, title))
                 print("\n" + suggestions)
         
@@ -133,6 +137,7 @@ def main():
                 keywords=keywords,
                 use_journal_finders=False,  # 不使用 Journal Finder
                 max_candidates=10,
+                review_preference=review_preference,
             )
             
             print("\n" + "="*70)

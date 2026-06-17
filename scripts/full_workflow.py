@@ -22,7 +22,17 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 from journal_finders import search_all_journal_finders
-from journal_metrics import get_journal_metrics, format_metrics_line
+from journal_metrics import (
+    annotate_apc,
+    annotate_review_cycle,
+    format_apc_line,
+    format_metrics_line,
+    format_review_cycle,
+    get_journal_metrics,
+    has_wos_on_hold_status,
+    review_preference_enabled,
+    score_review_speed,
+)
 from letpub_client import advanced_search
 
 
@@ -483,7 +493,13 @@ def _extract_innovation_points(abstract: str) -> List[Dict]:
     return points
 
 
-def rank_metric_records(profile: Dict, records: List[Dict], finder_results: List[Dict] = None, abstract: str = "") -> List[Dict]:
+def rank_metric_records(
+    profile: Dict,
+    records: List[Dict],
+    finder_results: List[Dict] = None,
+    abstract: str = "",
+    preferences: Optional[Dict] = None,
+) -> List[Dict]:
     """
     评分和排序期刊记录。
 
@@ -496,6 +512,9 @@ def rank_metric_records(profile: Dict, records: List[Dict], finder_results: List
         finder_results: Journal Finder 结果（用于权重参考 + 档次推断）
         abstract: 论文摘要文本（用于范围信号检测）
     """
+    preferences = preferences or {}
+    review_priority = review_preference_enabled(preferences.get("review_speed_priority"))
+
     # === Step 0: 推断论文档次 ===
     paper_tier_info = _infer_paper_tier_from_finders(finder_results or [], abstract=abstract)
     paper_tier = paper_tier_info["tier"]
@@ -515,8 +534,12 @@ def rank_metric_records(profile: Dict, records: List[Dict], finder_results: List
     # 创建 Journal Finder 结果的查找表（保留所有来源的排名信息）
     finder_lookup = {}
     finder_rank_lookup = {}  # 期刊在各来源中的排名
+    wos_on_hold_names = set()
     if finder_results:
         for r in finder_results:
+            if has_wos_on_hold_status(r):
+                wos_on_hold_names.add(str(r.get('journal_name', '')).lower())
+                continue
             name_lower = r['journal_name'].lower()
             if name_lower not in finder_lookup:
                 finder_lookup[name_lower] = r
@@ -537,9 +560,15 @@ def rank_metric_records(profile: Dict, records: List[Dict], finder_results: List
     ranked = []
 
     for record in records:
+        if has_wos_on_hold_status(record):
+            continue
         entry = dict(record)
+        annotate_review_cycle(entry)
+        annotate_apc(entry)
         name = entry.get('name', '')
         name_lower = name.lower()
+        if name_lower in wos_on_hold_names:
+            continue
 
         # 计算 fit_score
         fit_score = 0
@@ -658,11 +687,13 @@ def rank_metric_records(profile: Dict, records: List[Dict], finder_results: List
         aim_scope_bonus = min(aim_scope_bonus, 30)
 
         # 总分
-        total_score = fit_score + quality_score - risk_penalty + aim_scope_bonus
+        review_speed_score = score_review_speed(entry, enabled=review_priority)
+        total_score = fit_score + quality_score + review_speed_score - risk_penalty + aim_scope_bonus
 
         entry['fit_score'] = fit_score
         entry['quality_score'] = quality_score
         entry['raw_quality_score'] = raw_quality_score
+        entry['review_speed_score'] = review_speed_score
         entry['risk_penalty'] = risk_penalty
         entry['aim_scope_bonus'] = aim_scope_bonus
         entry['score'] = total_score
@@ -750,8 +781,8 @@ def format_selection_matrix(profile: Dict, ranked: List[Dict]) -> str:
     lines = [
         "## 快速决策表",
         "",
-        "| 期刊 | 建议 | 梯度 | IF | 分区 | 收录 |",
-        "|---|---|---|---:|---|---|",
+        "| 期刊 | 建议 | 梯度 | IF | 分区 | 收录 | APC | 审稿周期 |",
+        "|---|---|---|---:|---|---|---|---|",
     ]
     
     for item in ranked:
@@ -763,8 +794,10 @@ def format_selection_matrix(profile: Dict, ranked: List[Dict]) -> str:
         impact = item.get('impact_factor') or '-'
         partition = item.get('partition') or '-'
         sci = item.get('sci_type') or '-'
+        apc = format_apc_line(item).replace('|', '/')
+        review_cycle = format_review_cycle(item).replace('|', '/')
         
-        lines.append(f"| {name} | {tier} | {band} | {impact} | {partition} | {sci} |")
+        lines.append(f"| {name} | {tier} | {band} | {impact} | {partition} | {sci} | {apc} | {review_cycle} |")
     
     return "\n".join(lines)
 
@@ -816,6 +849,9 @@ def format_full_report(
     terms = "、".join(profile.get("matched_terms", [])[:8])
     if terms:
         lines.append(f"**命中主题**：{terms}")
+
+    if bundle.get('review_speed_priority'):
+        lines.append("**审稿周期偏好**：已启用快审/尽快接收见刊加权；WOS On Hold 期刊已硬排除。")
 
     # 论文档次推断（基于 Journal Finder 整体排序）
     paper_tier_info = None
@@ -876,6 +912,10 @@ def format_full_report(
         band = item.get("submission_band", "待定")
         lines.append(f"## {idx}. {item.get('name', '未知期刊')}｜{band}｜{tier_icons.get(item['tier'], item['tier'])}")
         lines.append(f"**指标**：{item.get('metrics_line') or format_metrics_line(item)}")
+        lines.append(f"**APC**：{format_apc_line(item)}")
+        lines.append(f"**审稿周期**：{format_review_cycle(item)}")
+        if item.get('review_speed_score'):
+            lines.append(f"**周期权重**：{item['review_speed_score']:+d}")
         
         # 来源信息
         source_info = []
@@ -901,6 +941,7 @@ def select_journals_with_finder(
     finder_config: Dict = None,
     impact_low: str = "3",
     max_candidates: int = 10,
+    review_preference: bool = False,
 ) -> Dict:
     """
     完整的期刊选择流程
@@ -917,6 +958,8 @@ def select_journals_with_finder(
     Returns:
         Dict: 包含 profile, results, finder_results
     """
+    review_speed_priority = review_preference_enabled(review_preference)
+
     # 构建论文文本
     paper_text = title + "\n" + abstract
     if keywords:
@@ -943,6 +986,7 @@ def select_journals_with_finder(
             default_config.update(finder_config)
         
         finder_results = search_all_journal_finders(title, abstract, keywords, default_config)
+        finder_results = [r for r in finder_results if not has_wos_on_hold_status(r)]
         
         print(f"\nJournal Finder 共找到 {len(finder_results)} 个期刊")
         
@@ -968,6 +1012,7 @@ def select_journals_with_finder(
     profile = infer_paper_profile(paper_text)
     profile['_title'] = title or ''
     profile['_abstract'] = abstract or ''
+    profile['review_speed_priority'] = review_speed_priority
     
     print("\n论文特征:")
     category_text = ", ".join([c["category1"] + "/" + c["category2"] for c in profile['categories']])
@@ -993,6 +1038,8 @@ def select_journals_with_finder(
 
     # 1. Journal Finder 结果
     for finder_result in finder_results:
+        if has_wos_on_hold_status(finder_result):
+            continue
         candidate_names.add(finder_result['journal_name'])
 
     # 2. 跨学科顶级期刊（永远不在 Journal Finder 或 LetPub 分类搜索中出现）
@@ -1042,12 +1089,24 @@ def select_journals_with_finder(
     print(f"\n正在获取 {len(candidate_names)} 个候选期刊的指标...")
     for name in candidate_names:
         metrics = get_journal_metrics_safe(name)
+        annotate_review_cycle(metrics)
+        annotate_apc(metrics)
+        if has_wos_on_hold_status(metrics):
+            continue
         if metrics.get('_sources'):
             metric_records.append(metrics)
     
     # 排序和分带
     print("\n正在进行智能排序...")
-    ranked = assign_submission_bands(rank_metric_records(profile, metric_records, finder_results, abstract=abstract))
+    ranked = assign_submission_bands(
+        rank_metric_records(
+            profile,
+            metric_records,
+            finder_results,
+            abstract=abstract,
+            preferences={'review_speed_priority': review_speed_priority},
+        )
+    )
     
     # 限制结果数量
     ranked = ranked[:max_candidates]
@@ -1057,6 +1116,7 @@ def select_journals_with_finder(
         'results': ranked,
         'finder_results': finder_results,
         'paper_tier_info': ranked[0].get('_paper_tier') if ranked else None,
+        'review_speed_priority': review_speed_priority,
     }
 
 
@@ -1064,13 +1124,13 @@ def select_journals_with_finder(
 # 便捷函数
 # ============================================================
 
-def quick_select(title: str, abstract: str, keywords: List[str] = None) -> str:
+def quick_select(title: str, abstract: str, keywords: List[str] = None, review_preference: bool = False) -> str:
     """快速选刊"""
-    bundle = select_journals_with_finder(title, abstract, keywords)
+    bundle = select_journals_with_finder(title, abstract, keywords, review_preference=review_preference)
     return format_full_report(bundle, title=title)
 
 
-def extract_and_select(file_path: str) -> str:
+def extract_and_select(file_path: str, review_preference: bool = False) -> str:
     """
     从文件提取并选刊
     
@@ -1086,5 +1146,5 @@ def extract_and_select(file_path: str) -> str:
     print(f"提取的摘要: {abstract[:100]}...")
     print(f"提取的关键词: {keywords}")
     
-    bundle = select_journals_with_finder(title, abstract, keywords)
+    bundle = select_journals_with_finder(title, abstract, keywords, review_preference=review_preference)
     return format_full_report(bundle, title=title)

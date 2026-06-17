@@ -21,6 +21,15 @@ Beyond the 5 Journal Finders, search LetPub for additional candidates:
 - Covers ALL publishers (AGU, Copernicus, MDPI, IEEE, Frontiers, NSR, etc.)
 - Includes ESCI journals with good JCR partition
 - Not limited to SCIE-only
+- Provides review-speed and APC clues that must be normalized before ranking
+
+### 3.1 Review Cycle and APC Controls
+- **Review cycle is optional as a ranking factor**: enable it only when the user explicitly says they want fast review, short review cycle, quick acceptance, or fast publication.
+- **APC is always reported**: for every recommended journal, show APC amount, source, and RMB estimate when exchange-rate conversion succeeds.
+- **Data-source order for review cycle**: journal official page or publisher data first; LetPub review-speed text second; if neither exists, mark as `未获取` rather than guessing.
+- **Data-source order for APC**: journal official/APC page first; DOAJ second; OpenAlex third.
+- **Currency conversion**: convert non-CNY APC to RMB using a live exchange-rate source; include the rate date when available.
+- **WOS On Hold hard rule**: any journal marked `On Hold` by Web of Science / Clarivate is excluded from the candidate pool and must not appear as `推荐`, `备选`, `谨慎`, or `不推荐`.
 
 ### 4. Top-Tier Cross-Disciplinary Pool
 For papers with strong innovation signals, always consider:
@@ -30,10 +39,32 @@ For papers with strong innovation signals, always consider:
 - **Nature Communications** (IF~16, broad scope)
 - These journals are NEVER returned by Journal Finders or LetPub category searches, but they DO publish high-quality earth/climate/environmental science
 
-### 4. Journal Learning and Abstract Revision
+### 5. Journal Learning and Abstract Revision
 Learn about a target journal and get abstract revision suggestions.
 
-### 5. Flexible Re-matching
+### 5.1 Reference Cover Letter
+When the user selects a target journal, output a text-only reference cover letter after the abstract suggestions. Use `/Volumes/DouXY/download/cover letter template.docx` only as the structural template; only these bracketed parts are adaptive:
+- `[Title]` → manuscript title
+- `[Journal]` → target journal name
+- `[Introduce the research background and significant]` → infer background and significance from title/abstract
+- `[Introduce the main work and novelty of this research ]` → infer main work and novelty from title/abstract
+- `[Emphasize the alignment ...]` → combine target-journal scope/preferences with the manuscript’s likely fit, then include standard originality/no simultaneous submission/all-author-approval statements as text that the author must verify
+
+The draft must:
+- Start with a Chinese disclaimer that it is for reference only and that the assistant is not responsible for whether the content is reasonable or true.
+- Make the editor-facing case for why the manuscript may deserve external review.
+- Tie journal fit to the target journal’s scope, readers, or recent-title signals rather than generic flattery.
+- Mark originality, no-simultaneous-submission, and all-author-approval statements as declarations the author must verify.
+- Output direct text, not a `.docx`, unless the user explicitly asks for a Word document.
+
+Style rules:
+- Use concise, confident, editor-facing language.
+- Lead with significance and contribution, not flattery.
+- Tie claims to wording from the title/abstract and journal scope.
+- Avoid unsupported hype such as `groundbreaking`, `paradigm-shifting`, `highly cited`, or `guaranteed impact` unless the user provides evidence.
+- Keep all unverified declarations clearly marked for author verification.
+
+### 6. Flexible Re-matching
 If user is not satisfied, re-run AI matching without Journal Finder constraints.
 
 ## Workflow Design
@@ -123,7 +154,39 @@ Step 3: 创新点提取 + 文献检索（当需要验证时）
 Step 4: 最终推荐
         → 综合三层信号，给出 10 个期刊推荐
         → 每个推荐标注信号来源和置信度
+        → 默认展示 APC 和审稿周期信息
+        → 仅在用户要求快审/尽快接收见刊时，把审稿周期纳入排序权重
 ```
+
+### Review Cycle Weighting Rules
+
+审稿周期不是默认排序维度。只有出现以下意图时才启用：
+- 中文：`审稿周期短`、`审稿快`、`快审`、`尽快接收`、`尽快见刊`、`快速发表`
+- English: `fast review`, `short review cycle`, `rapid decision`, `quick acceptance`, `fast publication`
+
+启用后：
+1. 先查期刊官网或出版商页面，记录 `time to first decision`、`review time`、`submission to acceptance`、`acceptance to publication`。
+2. 官网未获取时，用 LetPub 的 `平均审稿速度`，区分 `期刊官网数据`、`来源Elsevier官网`、`网友分享经验`。
+3. 将周期折算为天数：天=原值，周×7，月×30。
+4. 排序加权：≤45天明显加分，46-75天加分，76-120天小幅加分，121-180天不加不扣，181-270天扣分，>270天重扣；未知周期小扣分。
+5. 报告必须显示依据：如 `整体约45天（官网）` 或 `整体约8.3个月（LetPub网友）`。
+
+### APC Reporting Rules
+
+每个推荐期刊必须显示 APC：
+1. 优先查期刊官网/APC 页面或出版商页面；能获取官方金额时标记为官网来源。
+2. 官网未获取时查 DOAJ；DOAJ `has_apc=false` 时显示 `无APC（DOAJ）`。
+3. DOAJ 未获取时用 OpenAlex `apc_prices` / `apc_usd`；OpenAlex 的 APC 通常来自 DOAJ，报告中标注来源。
+4. 非人民币金额必须用实时汇率折算 RMB，并显示汇率日期；汇率失败时显示原币金额和 `人民币汇率未获取`。
+5. 不要因为 APC 高低自动改变推荐梯度，除非用户明确说有预算限制；默认只报告 APC，作为用户决策信息。
+
+### WOS On Hold Exclusion
+
+`On Hold` 是硬排除条件：
+1. Web of Science / Clarivate / Master Journal List 页面出现 `On Hold`、`收录暂停`、`暂停收录`，立即从候选池删除。
+2. LetPub、官网、Journal Finder、缓存或原始数据中出现等价 on-hold 字段，也删除。
+3. 删除后不再降级展示；不要把 on-hold 期刊放进 `谨慎` 或 `不推荐` 列表。
+4. 如果用户指定的目标期刊处于 on-hold，只能说明原因并建议替代期刊。
 
 ### Submission Band Logic
 | Paper Tier | Max Band | Meaning |
@@ -170,6 +233,23 @@ print(quick_select(title, abstract, keywords))
 EOF
 ```
 
+Fast-review mode:
+```bash
+cd ~/.hermes/skills/sci-aiselect
+~/.hermes/hermes-agent/venv/bin/python3 << 'EOF'
+import sys
+sys.path.insert(0, 'scripts')
+from full_workflow import quick_select
+
+print(quick_select(
+    "Your paper title",
+    "Your paper abstract...",
+    ["keyword1", "keyword2"],
+    review_preference=True,
+))
+EOF
+```
+
 ### Option 4: Journal Learning
 ```bash
 cd ~/.hermes/skills/sci-aiselect
@@ -209,7 +289,7 @@ Show top 10 journals with recommendation tier, submission band, metrics, and sou
 
 ### Step 5: User Decision
 Ask user if they have a preferred journal:
-- **If yes**: Learn about the journal and provide abstract revision suggestions
+- **If yes**: Learn about the journal, provide abstract revision suggestions, and output a reference-only cover letter
 - **If no**: Re-run AI matching without Journal Finder constraints
 
 ### Step 6: Journal Learning (If User Selects a Journal)
@@ -217,6 +297,7 @@ Ask user if they have a preferred journal:
 2. Extract aim and scope
 3. Analyze recent articles
 4. Provide abstract revision suggestions
+5. Generate a text-only reference cover letter from the template’s bracketed instructions
 
 ### Step 7: Abstract Revision Suggestions
 Based on journal analysis:
@@ -224,6 +305,16 @@ Based on journal analysis:
 - Structure suggestions
 - Style suggestions
 - Focus area suggestions
+
+### Step 8: Reference Cover Letter
+After abstract revision suggestions, output `Cover Letter 参考稿（仅供参考）`:
+1. Start with a prominent disclaimer in Chinese: the cover letter is for reference only; it is generated only from title, abstract, and public journal information; the assistant is not responsible for whether the content is reasonable or true.
+2. Follow the template order exactly: `Dear Editor` → submission sentence → background/significance paragraph → main work/novelty paragraph → journal alignment plus required declaration paragraph → `Sincerely` → `XXXXX`.
+3. Make the editorial hook explicit: name the reason the manuscript may merit external review.
+4. Emphasize likely reader interest and journal fit using aim/scope and recent-title signals.
+5. Do not invent author names, manuscript number, funding, ethics approval, conflicts of interest, data availability, or reviewer suggestions.
+6. For originality, no simultaneous submission, and all-author approval statements, include them only as text that the author must verify before use.
+7. Do not output a `.docx` unless the user explicitly asks for a Word document.
 
 ## Configuration
 
@@ -246,6 +337,8 @@ For each recommendation, include:
 - Tier: `推荐`, `备选`, `谨慎`, or `不推荐`
 - Submission band: `冲刺`, `稳妥`, `保底`, or `谨慎`
 - Metrics: IF, partition, SCI type, h-index
+- APC: original currency, RMB estimate, data source, and rate date when available
+- Review cycle: first decision / review / acceptance / publication timing when available
 - Source: which Journal Finder found it
 
 ## Common Mistakes
@@ -258,6 +351,12 @@ For each recommendation, include:
 - **Do not limit candidates to 5 Journal Finder publishers** — use LetPub to expand coverage to all publishers (AGU, Copernicus, MDPI, IEEE, Frontiers, etc.)
 - **Do not let IF ranking override topic fit** — aim & scope matching should be able to compensate for IF differences
 - **"novel framework" in abstract does not equal innovation** — check if the framework is actually novel or just a standard sensitivity analysis with a new name
+- **Do not rank by review speed unless the user asks for speed** — review cycle is an optional preference, not a default quality metric
+- **Do not include WOS On Hold journals anywhere in recommendations** — hard exclude them before scoring
+- **Do not hide APC** — every recommendation must show APC status, even when APC is unknown
+- **Do not invent APC or review-cycle data** — mark `未获取` when official/DOAJ/OpenAlex/LetPub data is unavailable
+- **Do not treat cover letter content as verified** — it is reference text only; do not add author names, ethics, funding, conflicts, data availability, reviewer suggestions, manuscript IDs, or other facts absent from title/abstract
+- **Do not write a generic cover letter** — state why the manuscript may deserve external review and tie journal fit to scope, readers, and topic overlap rather than flattery
 
 ## Pitfalls
 
